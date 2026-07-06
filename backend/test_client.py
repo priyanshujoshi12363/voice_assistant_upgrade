@@ -45,6 +45,8 @@ async def main():
                 kind = event.get("type")
                 if kind == "transcript":
                     print("you:", event["text"])
+                elif kind == "reply":
+                    print("assistant:", event["text"])
                 elif kind == "play_start":
                     state["playing"] = True
                     state["buf"] = []

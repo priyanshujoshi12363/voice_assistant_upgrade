@@ -136,17 +136,21 @@ async def ws_endpoint(ws: WebSocket):
             command = await loop.run_in_executor(pool, session.feed, samples)
             if command is None or command.size == 0:
                 continue
-            async with pipeline_lock:
-                text = await loop.run_in_executor(pool, stt.transcribe, command)
-                log.info("transcript: %r", text)
-                if not text:
-                    continue
-                await ws.send_text(json.dumps({"type": "transcript", "text": text}))
-                reply = await loop.run_in_executor(pool, session.llm.ask, text)
-                log.info("reply: %r", reply)
-                if tts is not None:
-                    audio = await loop.run_in_executor(pool, tts.synthesize, reply)
-                    await send_audio(ws, audio)
+            try:
+                async with pipeline_lock:
+                    text = await loop.run_in_executor(pool, stt.transcribe, command)
+                    log.info("transcript: %r", text)
+                    if not text:
+                        continue
+                    await ws.send_text(json.dumps({"type": "transcript", "text": text}))
+                    reply = await loop.run_in_executor(pool, session.llm.ask, text)
+                    log.info("reply: %r", reply)
+                    await ws.send_text(json.dumps({"type": "reply", "text": reply}))
+                    if tts is not None:
+                        audio = await loop.run_in_executor(pool, tts.synthesize, reply)
+                        await send_audio(ws, audio)
+            except Exception as exc:
+                log.exception("pipeline error: %s", exc)
     except WebSocketDisconnect:
         pass
     except Exception as exc:

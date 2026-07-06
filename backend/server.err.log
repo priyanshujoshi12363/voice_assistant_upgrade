@@ -1,0 +1,9 @@
+INFO:     Started server process [24664]
+INFO:     Waiting for application startup.
+2026-07-07 00:58:28,064 INFO loading whisper (tiny.en)
+2026-07-07 00:58:28,730 INFO HTTP Request: GET https://huggingface.co/api/models/Systran/faster-whisper-tiny.en/revision/main "HTTP/1.1 200 OK"
+2026-07-07 00:58:28,945 INFO loading piper
+2026-07-07 00:58:28,949 WARNING piper unavailable, transcript-only mode: No module named 'piper'
+2026-07-07 00:58:28,950 INFO models ready
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)

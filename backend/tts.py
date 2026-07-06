@@ -1,4 +1,25 @@
+import os
+import urllib.request
+
 import numpy as np
+
+VOICE_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+
+
+def _ensure_voice(model_path, config_path):
+    if os.path.exists(model_path) and os.path.exists(config_path):
+        return
+    name = os.path.splitext(os.path.basename(model_path))[0]
+    lang_full, speaker, quality = name.split("-")
+    lang = lang_full.split("_")[0]
+    remote_dir = f"{lang}/{lang_full}/{speaker}/{quality}"
+    os.makedirs(os.path.dirname(model_path) or ".", exist_ok=True)
+    for local_path, remote_file in (
+        (model_path, f"{name}.onnx"),
+        (config_path, f"{name}.onnx.json"),
+    ):
+        if not os.path.exists(local_path):
+            urllib.request.urlretrieve(f"{VOICE_BASE}/{remote_dir}/{remote_file}", local_path)
 
 
 def _resample(samples, src_rate, dst_rate):
@@ -14,6 +35,7 @@ class TTS:
     def __init__(self, model_path, config_path, out_rate):
         from piper import PiperVoice
 
+        _ensure_voice(model_path, config_path)
         self.voice = PiperVoice.load(model_path, config_path)
         self.out_rate = out_rate
 
