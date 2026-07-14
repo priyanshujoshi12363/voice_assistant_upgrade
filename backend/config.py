@@ -6,9 +6,6 @@ load_dotenv()
 SAMPLE_RATE = 16000
 FRAME_SAMPLES = 1280
 
-WAKEWORD_MODELS = os.getenv("WAKEWORD_MODELS", "hey_jarvis")
-WAKEWORD_THRESHOLD = float(os.getenv("WAKEWORD_THRESHOLD", "0.5"))
-
 SILENCE_RMS = float(os.getenv("SILENCE_RMS", "500"))
 END_SILENCE_MS = int(os.getenv("END_SILENCE_MS", "800"))
 MAX_COMMAND_MS = int(os.getenv("MAX_COMMAND_MS", "12000"))

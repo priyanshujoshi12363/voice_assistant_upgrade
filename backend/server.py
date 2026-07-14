@@ -1,19 +1,21 @@
+import os
+
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
 import asyncio
 import json
-import logging
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 import config
-from wakeword import WakeWord
 from stt import STT
 from llm import LLM
 from tts import TTS
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("server")
 
 app = FastAPI()
 pool = ThreadPoolExecutor(max_workers=2)
@@ -28,15 +30,11 @@ tts = None
 @app.on_event("startup")
 def load_models():
     global stt, tts
-    log.info("loading whisper (%s)", config.WHISPER_MODEL)
     stt = STT(config.WHISPER_MODEL, config.WHISPER_COMPUTE)
     try:
-        log.info("loading piper")
         tts = TTS(config.PIPER_MODEL, config.PIPER_CONFIG, config.SAMPLE_RATE)
-    except Exception as exc:
+    except Exception:
         tts = None
-        log.warning("piper unavailable, transcript-only mode: %s", exc)
-    log.info("models ready")
 
 
 @app.get("/")
@@ -53,15 +51,15 @@ def _rms(frame):
 
 class Session:
     def __init__(self):
-        self.wake = WakeWord(config.WAKEWORD_MODELS, config.WAKEWORD_THRESHOLD)
         self.llm = LLM(
             config.OLLAMA_BASE_URL,
             config.OLLAMA_API_KEY,
             config.OLLAMA_MODEL,
             config.SYSTEM_PROMPT,
         )
-        self.mode = "listen"
+        self.mode = "idle"
         self.leftover = np.zeros(0, dtype=np.int16)
+        self.preroll = deque(maxlen=3)
         self._reset_capture()
 
     def _reset_capture(self):
@@ -69,7 +67,6 @@ class Session:
         self.elapsed = 0.0
         self.silence = 0.0
         self.speech = 0.0
-        self.heard = False
 
     def feed(self, samples):
         self.leftover = np.concatenate([self.leftover, samples])
@@ -77,22 +74,26 @@ class Session:
         while self.leftover.size >= config.FRAME_SAMPLES:
             frame = self.leftover[: config.FRAME_SAMPLES]
             self.leftover = self.leftover[config.FRAME_SAMPLES :]
-            if self.mode == "listen":
-                if self.wake.detect(frame):
-                    self.mode = "capture"
+            level = _rms(frame)
+            if self.mode == "idle":
+                self.preroll.append(frame)
+                if level >= config.SILENCE_RMS:
                     self._reset_capture()
+                    self.capture.extend(self.preroll)
+                    self.preroll.clear()
+                    self.speech = FRAME_MS
+                    self.elapsed = FRAME_MS
+                    self.mode = "capture"
             else:
                 self.capture.append(frame)
                 self.elapsed += FRAME_MS
-                if _rms(frame) >= config.SILENCE_RMS:
-                    self.heard = True
+                if level >= config.SILENCE_RMS:
                     self.speech += FRAME_MS
                     self.silence = 0.0
                 else:
                     self.silence += FRAME_MS
                 done = (
-                    self.heard
-                    and self.speech >= config.MIN_SPEECH_MS
+                    self.speech >= config.MIN_SPEECH_MS
                     and self.silence >= config.END_SILENCE_MS
                 ) or self.elapsed >= config.MAX_COMMAND_MS
                 if done:
@@ -101,8 +102,8 @@ class Session:
                         if self.capture
                         else np.zeros(0, dtype=np.int16)
                     )
-                    self.mode = "listen"
-                    self.wake.reset()
+                    self.mode = "idle"
+                    self.preroll.clear()
                     break
         return command
 
@@ -121,7 +122,6 @@ async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     loop = asyncio.get_event_loop()
     session = await loop.run_in_executor(pool, Session)
-    log.info("client connected")
     try:
         while True:
             message = await ws.receive()
@@ -139,21 +139,17 @@ async def ws_endpoint(ws: WebSocket):
             try:
                 async with pipeline_lock:
                     text = await loop.run_in_executor(pool, stt.transcribe, command)
-                    log.info("transcript: %r", text)
                     if not text:
                         continue
                     await ws.send_text(json.dumps({"type": "transcript", "text": text}))
                     reply = await loop.run_in_executor(pool, session.llm.ask, text)
-                    log.info("reply: %r", reply)
                     await ws.send_text(json.dumps({"type": "reply", "text": reply}))
                     if tts is not None:
                         audio = await loop.run_in_executor(pool, tts.synthesize, reply)
                         await send_audio(ws, audio)
-            except Exception as exc:
-                log.exception("pipeline error: %s", exc)
+            except Exception:
+                pass
     except WebSocketDisconnect:
         pass
-    except Exception as exc:
-        log.exception("session error: %s", exc)
-    finally:
-        log.info("client disconnected")
+    except Exception:
+        pass
