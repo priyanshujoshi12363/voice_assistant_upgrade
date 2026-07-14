@@ -15,6 +15,6 @@ services:
       - key: OLLAMA_MODEL
         value: gpt-oss:20b-cloud
       - key: WHISPER_MODEL
-        value: tiny.en
+        value: models/faster-whisper-tiny.en
       - key: WHISPER_COMPUTE
         value: int8
